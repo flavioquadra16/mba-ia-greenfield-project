@@ -33,7 +33,12 @@ docker compose exec nestjs-api npm run start:dev
 
 Services:
 - `nestjs-api` — NestJS API, port `3000`
-- `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `db` — PostgreSQL 17, published on host port `5433` (container port `5432`). Address inside Compose is `db:5432`
+- `mailpit` — SMTP `1025`, Web UI `8025`
+- `redis` — BullMQ broker, port `6379`
+- `minio` — S3-compatible object storage (`pgsty/silo`), API `9000`, console `9001`
+- `minio-init` — creates the `streamtube` bucket and CORS, then exits
+- `video-worker` — BullMQ consumer. Runs `npm run start:worker` after `node_modules` exists. Uses `ffmpeg` and `ffprobe`
 
 All verification and teardown commands run on the **host machine**:
 
@@ -148,6 +153,16 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
+
+## Videos
+
+`VideosModule` is registered in `AppModule`. It does not register `VideoProcessor`. That provider lives only in `WorkerModule` (`src/worker.module.ts`), started with `npm run start:worker`.
+
+Upload endpoints accept JSON (title, filename, content type, size, part ETags). They never accept the video body. Presigned URLs are signed with `S3_PUBLIC_ENDPOINT`; server-side reads and writes use `S3_ENDPOINT` (`http://minio:9000` on the Compose network).
+
+A video row is inserted as `draft` inside `POST /videos`, before the client uploads any part. After `POST /videos/:id/upload/complete` the status is `processing` and a BullMQ job `process-video` is queued with `jobId` equal to the video id. The worker sets `ready` (duration, `metadata`, `thumbnail_key`) or, on the last failed attempt, `error`.
+
+Public playback is `GET /videos/public/:publicId/playback`. The response is `{ url, expiresAt }`. The caller sends `Range` to that URL and receives `206` from object storage. Download is `GET /videos/public/:publicId/download` and adds an attachment content disposition. Both require `status = ready`.
 
 ## Code Conventions
 

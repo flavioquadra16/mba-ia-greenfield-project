@@ -1,0 +1,8 @@
+---
+description: StreamTube project rules for Cursor agents
+alwaysApply: true
+---
+
+Follow `AGENTS.md`, `CLAUDE.md`, and the rules in `.claude/rules/`.
+
+Phase 03 video work stays inside the decisions in `docs/decisions/technical-decisions-phase-03-videos.md` and the plan in `docs/phases/phase-03-videos/phase-03-videos.md`. Do not proxy video bytes through the Nest API. Use Compose service names as hosts.

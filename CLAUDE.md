@@ -23,7 +23,7 @@ See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 - **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
 - **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
+- **Message Queue** (BullMQ / Redis) → video processing job queue
 - **Email Service** (SMTP) → account confirmation and password recovery
 
 ## Docker Networking
@@ -105,3 +105,34 @@ Skip documentation lookup only for trivial operations such as:
 
 If a library is involved and there is uncertainty, documentation lookup is mandatory.
 If the documentation returned does not match the installed version, flag the discrepancy before proceeding.
+
+## Phase 03 — Videos
+
+The backend owns upload, processing, streaming URLs, and download URLs. The Next.js UI is not part of this phase.
+
+- Module: `nestjs-project/src/videos/`. Storage client: `nestjs-project/src/storage/`. Queue registration: `nestjs-project/src/queue/`. Worker entry: `nestjs-project/src/worker.ts` (Nest application context, no HTTP).
+- Object storage is S3-compatible. Locally it is MinIO-compatible Silo (`pgsty/silo`) because the official `minio/minio` images no longer pull anonymously. Bucket `streamtube`. Keys `videos/{id}/original.{ext}` and `videos/{id}/thumbnail.jpg`.
+- Upload does not send the file through the API. `POST /videos` creates a `draft` and returns presigned multipart part URLs. The client PUTs parts to storage. `POST /videos/:id/upload/complete` finishes the object and enqueues processing.
+- Queue: BullMQ on Redis, queue name `video-processing`, job name `process-video`, `jobId` = video UUID. Only `video-worker` runs the processor. The worker uses `ffprobe` for duration and metadata and `ffmpeg` for one JPEG thumbnail.
+- Status: `draft` → `processing` → `ready` or `error`.
+- Public id: 11-character `public_id`, unique. Owner reads use the UUID (`GET /videos/:id`). Anonymous reads, playback, and download use `GET /videos/public/:publicId` and only succeed for `ready` videos.
+- Playback and download return presigned GET URLs. Streaming is an HTTP `Range` request to storage (`206`), not a download through the API.
+
+| Method | Path | Auth | Effect |
+|--------|------|------|--------|
+| POST | `/videos` | owner | Create draft and presign parts |
+| POST | `/videos/:id/upload/parts` | owner | Refresh part URLs |
+| POST | `/videos/:id/upload/complete` | owner | Complete upload, enqueue processing |
+| POST | `/videos/:id/upload/abort` | owner | Abort draft |
+| GET | `/videos/:id` | owner | Any status |
+| GET | `/videos/public/:publicId` | public | Ready video only |
+| GET | `/videos/public/:publicId/playback` | public | Presigned streaming URL |
+| GET | `/videos/public/:publicId/download` | public | Presigned attachment URL |
+
+Compose services added for this phase: `redis`, `minio`, `minio-init`, `video-worker`. Hosts inside the network stay the service names (`redis`, `minio`, `db`).
+
+Decisions and the phase plan: `docs/decisions/technical-decisions-phase-03-videos.md`, `docs/phases/phase-03-videos/`.
+
+## Tooling note
+
+This phase was produced in Cursor. `AGENTS.md` is the instruction file for that tool and matches this document. The workflow skills remain in `.claude/skills/` and were followed in order (research, context, validate, resolve, build, implement). `.cursor/mcp.json` carries the Postgres MCP server from `.mcp.json`.

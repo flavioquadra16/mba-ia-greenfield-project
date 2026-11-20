@@ -1,10 +1,12 @@
 import { DataSource } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { Channel } from '../channels/entities/channel.entity';
+import { Video } from '../videos/entities/video.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
 import { CreateUsersAndChannels1775687773260 } from './migrations/1775687773260-CreateUsersAndChannels';
 import { CreateAuthTokens1777579850478 } from './migrations/1777579850478-CreateAuthTokens';
+import { CreateVideos1795062452408 } from './migrations/1795062452408-CreateVideos';
 import { createTestDataSource } from '../test/create-test-data-source';
 
 const MANAGED_TABLES = [
@@ -19,7 +21,7 @@ describe('Database migrations (integration)', () => {
 
   beforeAll(async () => {
     dataSource = createTestDataSource(
-      [User, Channel, RefreshToken, VerificationToken],
+      [User, Channel, Video, RefreshToken, VerificationToken],
       {
         synchronize: false,
         migrations: [
@@ -31,18 +33,33 @@ describe('Database migrations (integration)', () => {
 
     await dataSource.initialize();
 
+    await dataSource.query(`DROP TABLE IF EXISTS "videos" CASCADE`);
     await Promise.all([
       ...MANAGED_TABLES.map((table) =>
         dataSource.query(`DROP TABLE IF EXISTS "${table}" CASCADE`),
       ),
       dataSource.query(`DROP TABLE IF EXISTS "migrations" CASCADE`),
     ]);
+    await dataSource.query(`DROP TYPE IF EXISTS "public"."video_status_enum"`);
+    await dataSource.query(
+      `DROP TYPE IF EXISTS "public"."verification_tokens_type_enum"`,
+    );
   });
 
   afterAll(async () => {
     // The second test undoes the last migration, leaving token tables missing.
     // Re-apply so the shared DB is fully migrated when subsequent suites run.
+    // CreateVideos stays out of this datasource migration list so undoLastMigration
+    // still targets the auth-token migration. Restore it explicitly afterwards.
     await dataSource.runMigrations();
+    const runner = dataSource.createQueryRunner();
+    await runner.connect();
+    await new CreateVideos1795062452408().up(runner);
+    await runner.query(
+      `INSERT INTO "migrations"("timestamp", "name") VALUES ($1, $2)`,
+      [1795062452408, 'CreateVideos1795062452408'],
+    );
+    await runner.release();
     await dataSource.destroy();
   });
 

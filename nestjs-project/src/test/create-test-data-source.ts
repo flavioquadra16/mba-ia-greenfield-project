@@ -1,4 +1,10 @@
-import { DataSource, EntitySchema, MigrationInterface } from 'typeorm';
+import {
+  DataSource,
+  DataSourceOptions,
+  EntityTarget,
+  MigrationInterface,
+  ObjectLiteral,
+} from 'typeorm';
 
 interface TestDataSourceOptions {
   synchronize?: boolean;
@@ -6,7 +12,7 @@ interface TestDataSourceOptions {
 }
 
 export function createTestDataSource(
-  entities: (Function | string | EntitySchema<any>)[],
+  entities: EntityTarget<ObjectLiteral>[],
   options: TestDataSourceOptions = {},
 ): DataSource {
   const { synchronize = true, migrations } = options;
@@ -17,13 +23,24 @@ export function createTestDataSource(
     username: process.env.DB_USERNAME ?? 'streamtube',
     password: process.env.DB_PASSWORD ?? 'streamtube',
     database: process.env.DB_DATABASE ?? 'streamtube',
-    entities,
+    entities: entities as DataSourceOptions['entities'],
     synchronize,
     ...(migrations !== undefined && { migrations, migrationsRun: false }),
   });
 }
 
 export async function cleanAllTables(dataSource: DataSource): Promise<void> {
+  await dataSource.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'videos'
+      ) THEN
+        DELETE FROM "videos";
+      END IF;
+    END $$;
+  `);
   await dataSource.query('DELETE FROM "refresh_tokens"');
   await dataSource.query('DELETE FROM "verification_tokens"');
   await dataSource.query('DELETE FROM "channels"');
